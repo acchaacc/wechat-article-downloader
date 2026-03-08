@@ -1,12 +1,16 @@
 {
   "name": "wechat-article-downloader",
-  "version": "0.1.0",
-  "description": "Download WeChat Official Account articles to Markdown with local images. Chrome CDP + WeChat API.",
+  "version": "0.2.0",
+  "description": "Download WeChat Official Account articles to Markdown with local images. Chrome CDP + Sogou Search + WeChat API. Claude Code skill.",
   "author": "Harmless Acceleration <harmlessacc@users.noreply.github.com>",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/harmlessacc/wechat-article-downloader"
+  },
+  "homepage": "https://github.com/harmlessacc/wechat-article-downloader",
+  "bugs": {
+    "url": "https://github.com/harmlessacc/wechat-article-downloader/issues"
   },
   "keywords": [
     "wechat",
@@ -15,6 +19,8 @@
     "article-downloader",
     "markdown",
     "chrome-cdp",
+    "sogou-search",
+    "wechat-api",
     "claude-code-skill"
   ],
   "scripts": {

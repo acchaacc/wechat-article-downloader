@@ -1,6 +1,6 @@
 ---
 name: wechat-article-downloader
-description: Downloads WeChat Official Account (微信公众号) articles and converts to Markdown with local images. Supports single URL, batch file, or bulk download all articles from your own account via API. Use when user mentions "download wechat article", "保存公众号文章", "下载公众号", "微信文章转markdown", or provides mp.weixin.qq.com URLs.
+description: Downloads WeChat Official Account (微信公众号) articles and converts to Markdown with local images. Supports single URL, batch file, search by account name (Sogou), or bulk download all articles from your own account via API. Use when user mentions "download wechat article", "保存公众号文章", "下载公众号", "微信文章转markdown", "备份公众号", or provides mp.weixin.qq.com URLs.
 ---
 
 # WeChat Article Downloader
@@ -13,13 +13,19 @@ Downloads WeChat Official Account articles via Chrome CDP and converts to clean 
 
 **Agent Execution Instructions**:
 1. Determine this SKILL.md file's directory path as `SKILL_DIR`
-2. Script path = `${SKILL_DIR}/scripts/<script-name>.ts`
-3. Replace all `${SKILL_DIR}` in this document with the actual path
+2. Detect runtime: if `bun` is available use `bun`, otherwise use `npx -y bun`. Store as `${BUN_X}`
+3. Script path = `${SKILL_DIR}/scripts/<script-name>.ts`
+4. Replace all `${SKILL_DIR}` and `${BUN_X}` in this document with actual values
+
+**Runtime Detection** (one-time per session):
+```bash
+command -v bun >/dev/null 2>&1 && echo "bun" || echo "npx -y bun"
+```
 
 **Script Reference**:
 | Script | Purpose |
 |--------|---------|
-| `scripts/main.ts` | CLI entry point for article downloading |
+| `scripts/main.ts` | CLI entry point — single URL, batch file, search, or account download |
 
 ## Preferences (EXTEND.md)
 
@@ -38,40 +44,68 @@ test -f "$HOME/.wechat-article-downloader/EXTEND.md" && echo "user"
 | `.wechat-article-downloader/EXTEND.md` | Project directory |
 | `$HOME/.wechat-article-downloader/EXTEND.md` | User home |
 
-**EXTEND.md Supports**: Default output directory | Image download toggle | Timeout settings
+| Result | Action |
+|--------|--------|
+| Found | Read, parse, apply settings |
+| Not found | Use defaults (no blocking setup required) |
+
+**EXTEND.md Supports**: Default output directory | Image download toggle | Timeout settings | Max scroll steps
+
+See `references/config/preferences-schema.md` for full schema.
 
 ## Features
 
-- Chrome CDP for full JavaScript rendering (handles lazy-loaded images)
-- Three modes: single URL, batch file, or account-wide download
-- WeChat-specific extraction: `#js_content`, `data-src` lazy images, metadata
-- Local image download with URL rewriting
-- YAML frontmatter: title, author, date, source_url, description
-- WeChat Official Platform API integration for bulk article listing
+- **Chrome CDP rendering** — Full JavaScript execution, handles lazy-loaded images
+- **Four download modes** — Single URL, batch file, search by account name, bulk account download via API
+- **Markdown output** — YAML frontmatter (title, author, date, source) + clean body
+- **Local images** — Downloads all article images, rewrites URLs to local paths
+- **WeChat-specific** — Handles `data-src` lazy loading, `mmbiz.qpic.cn` images, `#js_content` extraction
 
 ## Usage
 
+### Single Article
+
 ```bash
-# Single article
-npx -y bun ${SKILL_DIR}/scripts/main.ts "https://mp.weixin.qq.com/s/xxxx"
+${BUN_X} ${SKILL_DIR}/scripts/main.ts "https://mp.weixin.qq.com/s/xxxx"
+```
 
-# Single article without images
-npx -y bun ${SKILL_DIR}/scripts/main.ts "https://mp.weixin.qq.com/s/xxxx" --no-images
+### Single Article with Custom Output
 
-# Batch download from URL list file
-npx -y bun ${SKILL_DIR}/scripts/main.ts urls.txt -o ./articles/
+```bash
+${BUN_X} ${SKILL_DIR}/scripts/main.ts "https://mp.weixin.qq.com/s/xxxx" -o ./articles/
+```
 
-# Download all articles from your own account (requires API config)
-npx -y bun ${SKILL_DIR}/scripts/main.ts --account -o ./my-articles/
+### Search by Account Name (via Sogou)
 
-# List all articles from your account (no download)
-npx -y bun ${SKILL_DIR}/scripts/main.ts --account --list
+```bash
+# Search and download latest articles from a public account
+${BUN_X} ${SKILL_DIR}/scripts/main.ts --search "公众号名称" --max 5
 
-# Download latest 10 articles from your account
-npx -y bun ${SKILL_DIR}/scripts/main.ts --account --max 10
+# List search results only (no download)
+${BUN_X} ${SKILL_DIR}/scripts/main.ts --search "公众号名称" --list
+```
 
-# Login-required article (wait mode)
-npx -y bun ${SKILL_DIR}/scripts/main.ts "https://mp.weixin.qq.com/s/xxxx" --wait
+### Batch Download from URL List
+
+Create a `urls.txt` file (one URL per line, `#` for comments):
+
+```bash
+${BUN_X} ${SKILL_DIR}/scripts/main.ts urls.txt -o ./backup/
+```
+
+### Download from Your Own Account (API)
+
+Requires WeChat Official Account API credentials (see Environment Variables):
+
+```bash
+# List all articles
+${BUN_X} ${SKILL_DIR}/scripts/main.ts --account --list
+
+# Download all
+${BUN_X} ${SKILL_DIR}/scripts/main.ts --account -o ./my-articles/
+
+# Download latest 20
+${BUN_X} ${SKILL_DIR}/scripts/main.ts --account --max 20
 ```
 
 ## Options
@@ -80,22 +114,24 @@ npx -y bun ${SKILL_DIR}/scripts/main.ts "https://mp.weixin.qq.com/s/xxxx" --wait
 |--------|-------------|
 | `<url>` | Single WeChat article URL |
 | `<batch-file.txt>` | Text file with one URL per line |
-| `--account` | Download all articles from your own Official Account |
+| `--search, -s <name>` | Search & download articles from a public account by name |
+| `--account` | Download all articles from your own Official Account via API |
 | `-o, --output <dir>` | Output directory (default: `./wechat-articles/`) |
 | `--no-images` | Skip image download, keep remote URLs |
-| `--wait` | Wait for user signal before capturing (for login pages) |
+| `--wait` | Wait mode: log in manually, press Enter to capture |
 | `--timeout <ms>` | Page load timeout (default: 30000) |
-| `--list` | List articles only, don't download (with `--account`) |
-| `--max, -n <num>` | Max articles to download (with `--account`) |
+| `--list` | List articles only, don't download |
+| `--max, -n <num>` | Max articles to download (default: all) |
 
 ## Download Modes
 
 | Mode | Trigger | Behavior |
 |------|---------|----------|
-| Single URL | Pass a `mp.weixin.qq.com` URL | Download one article |
-| Batch file | Pass a `.txt` file path | Download all URLs in file |
-| Account | `--account` flag | List + download all articles via API |
-| Wait | `--wait` flag | Open Chrome, user logs in, press Enter |
+| Single URL | Pass a `mp.weixin.qq.com` URL | Download one article via CDP |
+| Batch file | Pass a `.txt` file path | Download all URLs in file sequentially |
+| Search | `--search "name"` | Find articles via Sogou Weixin Search, then download |
+| Account | `--account` flag | List + download all via WeChat Official Platform API |
+| Wait | `--wait` flag | Open Chrome, user logs in, press Enter to capture |
 
 ## Output Format
 
@@ -140,5 +176,10 @@ wechat-articles/
 - **Timeout** → Increase `--timeout` value
 - **Login required** → Use `--wait` mode
 - **API errors** → Check `WECHAT_APP_ID` and `WECHAT_APP_SECRET`
-- **Images not loading** → Increase scroll steps (WeChat lazy-loads images)
+- **Images not loading** → Page may need more scroll time; increase timeout
 - **Article deleted** → Error: "Article not found or has been deleted"
+- **Sogou captcha** → If search returns no results, Sogou may require CAPTCHA verification; try again later
+
+## Extension Support
+
+Custom configurations via EXTEND.md. See **Preferences** section for paths and supported options.

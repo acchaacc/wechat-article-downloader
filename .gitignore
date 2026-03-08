@@ -1,7 +1,28 @@
+# Dependencies
 node_modules/
-.baoyu-skills/.env
+
+# Environment / Secrets
 *.env
-chrome-profile/
+.env.*
+!.env.example
+
+# User preferences (local customizations)
+.wechat-article-downloader/
+
+# Output directories
 wechat-articles/
-wechat-article-downloader/
+
+# Chrome profile (local only)
+chrome-profile/
+
+# OS files
 .DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# Build artifacts
+*.tsbuildinfo

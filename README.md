@@ -1,23 +1,26 @@
 # WeChat Article Downloader
 
-Download WeChat Official Account (微信公众号) articles to clean Markdown with locally saved images.
+> Download WeChat Official Account (微信公众号) articles to clean Markdown with locally saved images.
 
-Built as a [Claude Code](https://claude.com/claude-code) skill — works standalone via CLI or as an agent-invocable skill.
+[中文文档](./README.zh.md)
+
+Built as a [Claude Code](https://docs.anthropic.com/en/docs/claude-code) skill — works standalone via CLI or as an agent-invocable skill.
 
 ## Features
 
 - **Chrome CDP rendering** — Full JavaScript execution, handles lazy-loaded images
-- **Three download modes** — Single URL, batch file, or bulk account download via API
+- **Four download modes** — Single URL, batch file, search by account name, or bulk account download via API
 - **Markdown output** — YAML frontmatter (title, author, date, source) + clean body
 - **Local images** — Downloads all article images, rewrites URLs to local paths
 - **WeChat-specific** — Handles `data-src` lazy loading, `mmbiz.qpic.cn` images, `#js_content` extraction
+- **Configurable** — EXTEND.md preferences, environment variables, CLI options
+
+## Prerequisites
+
+- [Bun](https://bun.sh/) runtime (or Node.js with `npx -y bun`)
+- Google Chrome or Chromium
 
 ## Quick Start
-
-### Prerequisites
-
-- [Bun](https://bun.sh/) runtime
-- Google Chrome or Chromium
 
 ### Install dependencies
 
@@ -31,10 +34,20 @@ bun install
 bun scripts/main.ts "https://mp.weixin.qq.com/s/YOUR_ARTICLE_ID"
 ```
 
-### Download with local images
+### Download with local images to a specific directory
 
 ```bash
 bun scripts/main.ts "https://mp.weixin.qq.com/s/xxxx" -o ./articles/
+```
+
+### Search and download by account name
+
+```bash
+# Download latest 5 articles from an account
+bun scripts/main.ts --search "公众号名称" --max 5
+
+# List articles only (no download)
+bun scripts/main.ts --search "公众号名称" --list
 ```
 
 ### Batch download from URL list
@@ -84,13 +97,24 @@ WECHAT_APP_SECRET=your_app_secret
 |--------|-------------|
 | `<url>` | Single WeChat article URL |
 | `<file.txt>` | Batch file with URLs |
+| `--search, -s <name>` | Search & download articles from a public account by name |
 | `--account` | Download from your own Official Account via API |
 | `-o, --output <dir>` | Output directory (default: `./wechat-articles/`) |
 | `--no-images` | Skip image download, keep remote URLs |
 | `--wait` | Wait mode: log in manually, then press Enter |
 | `--timeout <ms>` | Page load timeout (default: 30000) |
-| `--list` | List articles only (with `--account`) |
+| `--list` | List articles only (with `--search` or `--account`) |
 | `--max, -n <num>` | Max articles to download |
+
+## Download Modes
+
+| Mode | Trigger | Behavior |
+|------|---------|----------|
+| **Single URL** | Pass a `mp.weixin.qq.com` URL | Download one article via CDP |
+| **Batch file** | Pass a `.txt` file path | Download all URLs in file sequentially |
+| **Search** | `--search "name"` | Find articles via Sogou Weixin Search, then download |
+| **Account** | `--account` flag | List + download all via WeChat Official Platform API |
+| **Wait** | `--wait` flag | Open Chrome, user logs in, press Enter |
 
 ## Output Format
 
@@ -124,19 +148,44 @@ Article content in Markdown...
 
 ## Claude Code Skill Usage
 
-This tool works as a Claude Code skill. Install by symlinking:
+### Install as a skill
 
 ```bash
+# Clone to your skills directory
+git clone https://github.com/harmlessacc/wechat-article-downloader ~/.claude/skills/wechat-article-downloader
+
+# Or symlink from an existing clone
 ln -s /path/to/wechat-article-downloader ~/.claude/skills/wechat-article-downloader
 ```
 
-Then in Claude Code, say:
+### Trigger keywords
+
+In Claude Code, say:
 
 - "下载这篇公众号文章 https://mp.weixin.qq.com/s/xxxx"
 - "保存公众号文章到 Markdown"
 - "批量下载公众号所有文章"
+- "搜索并下载时见谈最近的文章"
+- "Download this WeChat article"
 
-## Environment Variables
+## Configuration
+
+### EXTEND.md Preferences
+
+Customize defaults via `EXTEND.md` (project-level or user-level):
+
+```markdown
+# Preferences
+- default_output: ./my-wechat-articles
+- download_images: true
+- timeout: 45000
+```
+
+**Lookup order**: `.wechat-article-downloader/EXTEND.md` → `~/.wechat-article-downloader/EXTEND.md`
+
+See [references/config/preferences-schema.md](./references/config/preferences-schema.md) for all options.
+
+### Environment Variables
 
 | Variable | Description |
 |----------|-------------|
@@ -147,7 +196,7 @@ Then in Claude Code, say:
 
 ## How It Works
 
-1. **Chrome CDP** launches a headless Chrome instance
+1. **Chrome CDP** launches a Chrome instance via DevTools Protocol
 2. **Navigates** to the WeChat article URL
 3. **Scrolls** the page to trigger lazy image loading (`data-src` → `src`)
 4. **Extracts** metadata (title, author, date) and content HTML from `#js_content`
@@ -155,8 +204,22 @@ Then in Claude Code, say:
 6. **Converts** HTML to Markdown using Turndown with WeChat-specific rules
 7. **Writes** `.md` file with YAML frontmatter and local image references
 
-For `--account` mode, it first calls the WeChat Official Platform API to list all published articles, then downloads each one via CDP.
+For `--search` mode, it uses Sogou Weixin Search to find articles by account name, then downloads each one via CDP.
+
+For `--account` mode, it calls the WeChat Official Platform API to list all published articles, then downloads each one via CDP.
+
+## Troubleshooting
+
+| Problem | Solution |
+|---------|----------|
+| Chrome not found | Install Chrome or set `WECHAT_DL_CHROME_PATH` |
+| Timeout | Increase `--timeout` value |
+| Login required | Use `--wait` mode |
+| API errors | Check `WECHAT_APP_ID` and `WECHAT_APP_SECRET` |
+| Images not loading | Page may need more scroll time |
+| Article deleted | The article has been removed by the author |
+| Sogou captcha | Try again later or use direct URLs |
 
 ## License
 
-MIT
+[MIT](./LICENSE)

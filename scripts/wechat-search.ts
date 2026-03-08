@@ -2,37 +2,60 @@ import type { CdpConnection } from "./cdp.js";
 import { evaluateScript } from "./cdp.js";
 
 /**
- * Search for a WeChat Official Account's recent articles via Sogou Weixin Search.
- * Returns a list of article URLs.
+ * Extract WeChat article links from Sogou Weixin search results page.
+ * Assumes the page is already loaded at weixin.sogou.com search results.
  */
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// Extract article links from Sogou search results page (type=2, article search)
 const extractArticleLinksScript = `
 (function() {
   var links = [];
-  // Sogou weixin search result items
-  var items = document.querySelectorAll('.news-list li, .news-box li, ul.news-list > li');
+  var seen = {};
+
+  // Method 1: Sogou article search result items (.news-list structure)
+  var items = document.querySelectorAll('.news-list li, .news-box li, ul.news-list > li, .txt-box');
   items.forEach(function(item) {
-    var a = item.querySelector('h3 a, .txt-box h3 a, a[href*="weixin.qq.com"]');
+    var a = item.querySelector('h3 a, a[href*="weixin.qq.com"]');
     if (a) {
       var href = a.href || a.getAttribute('href') || '';
-      var title = a.textContent.trim();
-      if (href && title) {
-        links.push({ url: href, title: title });
+      var title = (a.textContent || '').trim().replace(/\\s+/g, ' ');
+      // Try to extract account name from the result item
+      var accountEl = item.querySelector('.account, .s-p a, .s-p, .tit-s');
+      var account = accountEl ? (accountEl.textContent || '').trim() : '';
+      if (href && title && title.length > 2 && !seen[title]) {
+        seen[title] = true;
+        links.push({ url: href, title: title, account: account });
       }
     }
   });
 
-  // Fallback: any link pointing to mp.weixin.qq.com
+  // Method 2: Broader fallback - any link containing mp.weixin.qq.com or sogou redirect
   if (links.length === 0) {
     document.querySelectorAll('a[href]').forEach(function(a) {
       var href = a.href || '';
-      var title = a.textContent.trim();
-      if (href.indexOf('mp.weixin.qq.com') !== -1 && title && title.length > 4) {
-        links.push({ url: href, title: title });
+      var title = (a.textContent || '').trim().replace(/\\s+/g, ' ');
+      if (title.length > 4 && !seen[title]) {
+        if (href.indexOf('mp.weixin.qq.com') !== -1 ||
+            href.indexOf('weixin.sogou.com/link') !== -1) {
+          seen[title] = true;
+          links.push({ url: href, title: title, account: '' });
+        }
+      }
+    });
+  }
+
+  // Method 3: Even broader - get all substantial links on the page
+  if (links.length === 0) {
+    document.querySelectorAll('a[href]').forEach(function(a) {
+      var href = a.href || '';
+      var title = (a.textContent || '').trim().replace(/\\s+/g, ' ');
+      if (title.length > 8 && !seen[title] && href.indexOf('javascript:') === -1 && href.indexOf('#') !== 0) {
+        seen[title] = true;
+        links.push({ url: href, title: title, account: '' });
       }
     });
   }
@@ -41,33 +64,27 @@ const extractArticleLinksScript = `
 })()
 `;
 
-const extractAccountArticlesScript = `
+// Debug: dump page info
+const debugPageScript = `
 (function() {
-  var links = [];
-  // On sogou account page, articles are listed
-  document.querySelectorAll('a[href]').forEach(function(a) {
-    var href = a.href || '';
-    var title = a.textContent.trim();
-    // Match weixin article links
-    if ((href.indexOf('mp.weixin.qq.com/s') !== -1 || href.indexOf('weixin.qq.com/s?') !== -1)
-        && title && title.length > 2) {
-      // Deduplicate
-      var exists = false;
-      for (var i = 0; i < links.length; i++) {
-        if (links[i].title === title) { exists = true; break; }
-      }
-      if (!exists) {
-        links.push({ url: href, title: title });
-      }
-    }
-  });
-  return links;
+  return {
+    url: location.href,
+    title: document.title,
+    linkCount: document.querySelectorAll('a').length,
+    bodyLength: (document.body.textContent || '').length,
+    hasNewsList: !!document.querySelector('.news-list'),
+    hasResults: !!document.querySelector('.results'),
+    sampleLinks: Array.from(document.querySelectorAll('a')).slice(0, 10).map(function(a) {
+      return { href: (a.href || '').substring(0, 80), text: (a.textContent || '').trim().substring(0, 40) };
+    })
+  };
 })()
 `;
 
 export interface SearchResult {
   url: string;
   title: string;
+  account?: string;
 }
 
 export async function searchAccountArticles(
@@ -77,86 +94,50 @@ export async function searchAccountArticles(
   maxArticles: number = 5,
   log?: (msg: string) => void,
 ): Promise<SearchResult[]> {
-  // Step 1: Navigate to Sogou Weixin Search — search for account
-  const searchUrl = `https://weixin.sogou.com/weixin?type=1&query=${encodeURIComponent(accountName)}&ie=utf8`;
-  log?.(`Searching for account "${accountName}" on Sogou...`);
+  // Page should already be loaded at sogou search results
+  // First, debug what we see on the page
+  const debug = await evaluateScript<{
+    url: string; title: string; linkCount: number; bodyLength: number;
+    hasNewsList: boolean; hasResults: boolean;
+    sampleLinks: Array<{ href: string; text: string }>;
+  }>(cdp, sessionId, debugPageScript);
 
-  await navigateAndWaitLoad(cdp, sessionId, searchUrl, 15_000);
-  await sleep(2_000);
+  log?.(`Page: ${debug.url}`);
+  log?.(`Title: ${debug.title}`);
+  log?.(`Links: ${debug.linkCount}, Body: ${debug.bodyLength} chars`);
 
-  // Step 2: Find the account link and click into it
-  const clickAccountScript = `
-  (function() {
-    // Find the account matching the name
-    var accounts = document.querySelectorAll('.news-box .img-box a, .news-list .img-box a, a.account_name, .txt-box a, p.tit a');
-    for (var i = 0; i < accounts.length; i++) {
-      var text = accounts[i].textContent.trim();
-      if (text === "${accountName.replace(/"/g, '\\"')}") {
-        return accounts[i].href || '';
-      }
-    }
-    // Broader match
-    var allLinks = document.querySelectorAll('a[href]');
-    for (var i = 0; i < allLinks.length; i++) {
-      var text = allLinks[i].textContent.trim();
-      if (text.indexOf("${accountName.replace(/"/g, '\\"')}") !== -1 && allLinks[i].href.indexOf('sogou.com') !== -1) {
-        return allLinks[i].href || '';
-      }
-    }
-    return '';
-  })()
-  `;
-
-  const accountPageUrl = await evaluateScript<string>(cdp, sessionId, clickAccountScript);
-
-  let articles: SearchResult[] = [];
-
-  if (accountPageUrl) {
-    // Navigate to account page
-    log?.(`Found account page, loading articles...`);
-    await navigateAndWaitLoad(cdp, sessionId, accountPageUrl, 15_000);
-    await sleep(2_000);
-
-    articles = await evaluateScript<SearchResult[]>(cdp, sessionId, extractAccountArticlesScript);
+  if (debug.bodyLength < 100) {
+    log?.(`Page seems empty, waiting more...`);
+    await sleep(3_000);
   }
 
-  // If no articles found via account page, try article search directly
-  if (articles.length === 0) {
-    log?.(`Trying article search...`);
-    const articleSearchUrl = `https://weixin.sogou.com/weixin?type=2&query=${encodeURIComponent(accountName)}&ie=utf8`;
-    await navigateAndWaitLoad(cdp, sessionId, articleSearchUrl, 15_000);
-    await sleep(2_000);
+  // Extract article links
+  let articles = await evaluateScript<SearchResult[]>(cdp, sessionId, extractArticleLinksScript);
 
-    articles = await evaluateScript<SearchResult[]>(cdp, sessionId, extractArticleLinksScript);
+  // Filter out navigation/noise links
+  articles = articles.filter(a =>
+    a.title.length > 4 &&
+    !a.title.includes("搜狗") &&
+    !a.title.includes("登录") &&
+    !a.title.includes("首页")
+  );
+
+  // If account name extracted, prefer articles from the matching account
+  const accountMatched = articles.filter(a =>
+    a.account && a.account.includes(accountName)
+  );
+
+  const finalArticles = accountMatched.length > 0 ? accountMatched : articles;
+  const result = finalArticles.slice(0, maxArticles);
+
+  log?.(`Found ${result.length} articles${accountMatched.length > 0 ? ` (matched account: ${accountName})` : ""}.`);
+
+  if (result.length > 0) {
+    for (let i = 0; i < result.length; i++) {
+      const acctInfo = result[i].account ? ` [${result[i].account}]` : "";
+      log?.(`  ${i + 1}. ${result[i].title}${acctInfo}`);
+    }
   }
 
-  // Limit results
-  const result = articles.slice(0, maxArticles);
-  log?.(`Found ${result.length} articles.`);
   return result;
-}
-
-async function navigateAndWaitLoad(
-  cdp: CdpConnection,
-  sessionId: string,
-  url: string,
-  timeoutMs: number,
-): Promise<void> {
-  const loadPromise = new Promise<void>((resolve) => {
-    const timer = setTimeout(() => {
-      cdp.off("Page.lifecycleEvent", handler);
-      resolve();
-    }, timeoutMs);
-    const handler = (params: unknown) => {
-      const p = params as { name?: string };
-      if (p.name === "load" || p.name === "DOMContentLoaded") {
-        clearTimeout(timer);
-        cdp.off("Page.lifecycleEvent", handler);
-        resolve();
-      }
-    };
-    cdp.on("Page.lifecycleEvent", handler);
-  });
-  await cdp.send("Page.navigate", { url }, { sessionId });
-  await loadPromise;
 }

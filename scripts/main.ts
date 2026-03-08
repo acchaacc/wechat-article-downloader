@@ -237,7 +237,7 @@ async function withChrome<T>(
     cdp = await CdpConnection.connect(wsUrl, CDP_CONNECT_TIMEOUT_MS);
 
     const targets = await cdp.send<{ targetInfos: Array<{ targetId: string; type: string; url: string }> }>("Target.getTargets");
-    const pageTarget = targets.targetInfos.find(t => t.type === "page" && t.url.startsWith("http"));
+    const pageTarget = targets.targetInfos.find(t => t.type === "page");
     if (!pageTarget) throw new Error("No page target found");
 
     const { sessionId } = await cdp.send<{ sessionId: string }>(
@@ -336,11 +336,39 @@ async function main(): Promise<void> {
 async function handleSearchMode(args: Args): Promise<void> {
   const accountName = args.search;
   const max = isFinite(args.maxArticles) ? args.maxArticles : 10;
+  const searchUrl = `https://weixin.sogou.com/weixin?type=2&query=${encodeURIComponent(accountName)}&ie=utf8`;
 
   await mkdir(args.output, { recursive: true });
 
-  await withChrome("https://weixin.sogou.com", false, async (cdp, sessionId) => {
-    // Search for articles
+  // Launch Chrome directly with the search URL
+  const port = await getFreePort();
+  const chrome = await launchChrome(searchUrl, port, false);
+
+  let cdp: CdpConnection | null = null;
+  try {
+    const wsUrl = await waitForChromeDebugPort(port, 30_000);
+    cdp = await CdpConnection.connect(wsUrl, CDP_CONNECT_TIMEOUT_MS);
+
+    // Wait a moment for Chrome to settle
+    await sleep(2_000);
+
+    const targets = await cdp.send<{ targetInfos: Array<{ targetId: string; type: string; url: string }> }>("Target.getTargets");
+    const pageTarget = targets.targetInfos.find(t => t.type === "page");
+    if (!pageTarget) throw new Error("No page target found");
+
+    const { sessionId } = await cdp.send<{ sessionId: string }>(
+      "Target.attachToTarget",
+      { targetId: pageTarget.targetId, flatten: true }
+    );
+    await cdp.send("Network.enable", {}, { sessionId });
+    await cdp.send("Page.enable", {}, { sessionId });
+
+    // Wait for sogou search page to load
+    console.log(`Searching for "${accountName}" on Sogou...`);
+    await waitForNetworkIdle(cdp, sessionId, NETWORK_IDLE_TIMEOUT_MS);
+    await sleep(2_000);
+
+    // Extract article links from search results
     const articles = await searchAccountArticles(cdp, sessionId, accountName, max, console.log);
 
     if (articles.length === 0) {
@@ -362,7 +390,7 @@ async function handleSearchMode(args: Args): Promise<void> {
 
     const result = await processBatch(
       urls,
-      async (url, _idx) => processOneArticle(cdp, sessionId, url, args),
+      async (url, _idx) => processOneArticle(cdp!, sessionId, url, args),
       { delayMs: BATCH_INTER_ARTICLE_DELAY_MS, log: console.log }
     );
 
@@ -375,7 +403,13 @@ async function handleSearchMode(args: Args): Promise<void> {
         console.log(`  ${f.url}: ${f.error}`);
       }
     }
-  });
+  } finally {
+    if (cdp) {
+      try { await cdp.send("Browser.close", {}, { timeoutMs: 5_000 }); } catch {}
+      cdp.close();
+    }
+    killChrome(chrome);
+  }
 }
 
 async function handleAccountMode(args: Args): Promise<void> {
@@ -383,8 +417,8 @@ async function handleAccountMode(args: Args): Promise<void> {
   if (!config) {
     console.error("WeChat API credentials not found.");
     console.error("Set WECHAT_APP_ID and WECHAT_APP_SECRET in:");
-    console.error("  - .baoyu-skills/.env (project level)");
-    console.error("  - ~/.baoyu-skills/.env (user level)");
+    console.error("  - .wechat-article-downloader/.env (project level)");
+    console.error("  - ~/.wechat-article-downloader/.env (user level)");
     console.error("  - Environment variables");
     process.exit(1);
   }
