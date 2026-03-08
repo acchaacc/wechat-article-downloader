@@ -145,7 +145,7 @@ Article content in Markdown...
 
 ```bash
 # Clone to your skills directory
-git clone https://github.com/harmlessacc/wechat-article-downloader ~/.claude/skills/wechat-article-downloader
+git clone https://github.com/acchaacc/wechat-article-downloader ~/.claude/skills/wechat-article-downloader
 
 # Or symlink from an existing clone
 ln -s /path/to/wechat-article-downloader ~/.claude/skills/wechat-article-downloader
@@ -220,4 +220,4 @@ URL → 🌐 Chrome CDP → 📄 Navigate → ⬇️ Scroll (lazy load)
 
 ---
 
-Made with ❤️ by [Harmless Acceleration](https://github.com/harmlessacc)
+Made with ❤️ by [Harmless Acceleration](https://github.com/acchaacc)
