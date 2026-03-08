@@ -1,0 +1,27 @@
+{
+  "name": "wechat-article-downloader",
+  "version": "0.1.0",
+  "description": "Download WeChat Official Account articles to Markdown with local images. Chrome CDP + WeChat API.",
+  "author": "Harmless Acceleration <harmlessacc@users.noreply.github.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/harmlessacc/wechat-article-downloader"
+  },
+  "keywords": [
+    "wechat",
+    "weixin",
+    "official-account",
+    "article-downloader",
+    "markdown",
+    "chrome-cdp",
+    "claude-code-skill"
+  ],
+  "scripts": {
+    "start": "bun scripts/main.ts"
+  },
+  "dependencies": {
+    "turndown": "^7.2.0",
+    "turndown-plugin-gfm": "^1.0.2"
+  }
+}

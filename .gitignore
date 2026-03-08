@@ -1,0 +1,7 @@
+node_modules/
+.baoyu-skills/.env
+*.env
+chrome-profile/
+wechat-articles/
+wechat-article-downloader/
+.DS_Store
